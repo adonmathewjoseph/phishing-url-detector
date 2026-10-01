@@ -1,0 +1,18 @@
+# Python virtual environment
+venv/
+env/
+.env
+
+# Python byte-code & caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.pkl
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VS Code settings
+.vscode/

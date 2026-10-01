@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CyberGuard // AI Phishing URL Telemetry & Detector</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            cyberDark: '#080c14',
+            cyberCard: 'rgba(15, 23, 42, 0.75)',
+            cyberBorder: 'rgba(56, 189, 248, 0.2)',
+            neonGreen: '#10b981',
+            neonAmber: '#f59e0b',
+            neonRed: '#ef4444',
+            neonCyan: '#06b6d4',
+            neonViolet: '#8b5cf6'
+          },
+          fontFamily: {
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+            sans: ['Inter', 'system-ui', 'sans-serif']
+          },
+          boxShadow: {
+            'glow-cyan': '0 0 25px -5px rgba(6, 182, 212, 0.4)',
+            'glow-red': '0 0 25px -5px rgba(239, 68, 68, 0.4)',
+            'glow-green': '0 0 25px -5px rgba(16, 185, 129, 0.4)'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Canvas Confetti for safe verifications -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+    
+    body {
+      background-color: #070a12;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(6, 182, 212, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.12) 0px, transparent 50%),
+        radial-gradient(at 50% 50%, rgba(15, 23, 42, 0.5) 0px, transparent 80%);
+      background-attachment: fixed;
+    }
+
+    .grid-bg {
+      background-size: 32px 32px;
+      background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                        linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    }
+
+    .scanline {
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.8), transparent);
+      animation: scan 4s linear infinite;
+    }
+
+    @keyframes scan {
+      0% { top: 0%; opacity: 0; }
+      15% { opacity: 1; }
+      85% { opacity: 1; }
+      100% { top: 100%; opacity: 0; }
+    }
+
+    .meter-circle {
+      transition: stroke-dashoffset 0.85s cubic-bezier(0.16, 1, 0.3, 1), stroke 0.4s ease;
+    }
+    
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0c1220; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+  </style>
+</head>
+<body class="min-h-screen text-slate-200 font-sans grid-bg flex flex-col justify-between selection:bg-cyan-500/30 selection:text-cyan-200 relative overflow-x-hidden">
+
+  <!-- Scanline subtle visual fx -->
+  <div class="scanline pointer-events-none z-50"></div>
+
+  <header class="border-b border-slate-800/80 backdrop-blur-md bg-cyberDark/70 sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      
+      <!-- Brand & Status -->
+      <div class="flex items-center space-x-3">
+        <div class="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-violet-600 shadow-glow-cyan">
+          <i data-lucide="shield-alert" class="w-5 h-5 text-white"></i>
+          <span class="absolute -top-1 -right-1 flex h-3 w-3">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+          </span>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-1.5">
+              PHISH<span class="text-cyan-400">RADAR</span>
+              <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/30 text-cyan-300">M1 ARM64 Native</span>
+            </h1>
+          </div>
+          <p class="text-xs text-slate-400 font-mono">Lexical Entropy & ML Inference Node</p>
+        </div>
+      </div>
+
+      <!-- Mode Selector & API Switcher -->
+      <div class="flex items-center gap-3">
+        <div class="flex items-center bg-slate-900/90 border border-slate-800 rounded-lg p-1 text-xs font-mono">
+          <button id="btnModeClient" onclick="setEngineMode('client')" class="px-3 py-1.5 rounded-md text-cyan-300 bg-cyan-950/70 border border-cyan-500/40 transition">
+            Client Heuristics
+          </button>
+          <button id="btnModeServer" onclick="setEngineMode('server')" class="px-3 py-1.5 rounded-md text-slate-400 hover:text-slate-200 transition">
+            FastAPI Server (:8000)
+          </button>
+        </div>
+
+        <div id="serverPill" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono bg-slate-900/80 border border-slate-700/60 text-slate-400">
+          <span id="serverPingDot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+          <span id="serverPingText">Backend: Idle</span>
+        </div>
+      </div>
+
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 w-full flex-1">
+    
+    <!-- Top Input Card -->
+    <div class="relative bg-cyberCard backdrop-blur-xl border border-slate-800/90 rounded-2xl p-5 sm:p-7 shadow-2xl mb-8">
+      <div class="flex flex-col gap-4">
+        
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <label for="urlInput" class="text-sm font-semibold tracking-wide text-slate-200 flex items-center gap-2">
+            <i data-lucide="crosshair" class="w-4 h-4 text-cyan-400"></i>
+            TARGET URL INSPECTION
+          </label>
+          <span class="text-xs text-slate-400 font-mono">Real-time tokenizer and feature extractor</span>
+        </div>
+
+        <!-- URL Input Field with Action Buttons -->
+        <div class="relative flex flex-col md:flex-row gap-3">
+          <div class="relative flex-1">
+            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+              <i data-lucide="link-2" class="w-5 h-5 text-cyan-400"></i>
+            </div>
+            <input 
+              type="text" 
+              id="urlInput" 
+              placeholder="Paste or type any suspect link (e.g. http://192.168.1.1/paypal/login.php)..."
+              class="w-full pl-11 pr-24 py-3.5 bg-slate-950/80 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 font-mono text-sm focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition"
+              onkeydown="if(event.key === 'Enter') analyzeCurrentUrl()"
+            />
+            <button 
+              onclick="pasteClipboard()" 
+              class="absolute inset-y-1.5 right-1.5 px-3 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-mono rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+              title="Paste from clipboard">
+              <i data-lucide="clipboard" class="w-3.5 h-3.5"></i>
+              <span class="hidden sm:inline">Paste</span>
+            </button>
+          </div>
+
+          <button 
+            id="scanBtn"
+            onclick="analyzeCurrentUrl()" 
+            class="px-7 py-3.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold rounded-xl shadow-glow-cyan text-sm tracking-wide transition flex items-center justify-center gap-2 font-mono active:scale-98">
+            <i data-lucide="scan-line" class="w-4 h-4"></i>
+            <span>SCAN LINK</span>
+          </button>
+        </div>
+
+        <div class="pt-2 border-t border-slate-800/60 flex flex-wrap items-center gap-2">
+          <span class="text-xs font-mono text-slate-400 flex items-center gap-1 mr-1">
+            <i data-lucide="zap" class="w-3 h-3 text-amber-400"></i> Preset Telemetry:
+          </span>
+          
+          <button onclick="loadSample('safe1')" class="text-xs font-mono px-2.5 py-1 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-300 transition flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Apple Official
+          </button>
+          <button onclick="loadSample('safe2')" class="text-xs font-mono px-2.5 py-1 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/30 text-emerald-300 transition flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> GitHub Docs
+          </button>
+          <button onclick="loadSample('phishIp')" class="text-xs font-mono px-2.5 py-1 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 text-red-300 transition flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Raw IP Attack
+          </button>
+          <button onclick="loadSample('phishBrand')" class="text-xs font-mono px-2.5 py-1 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 text-red-300 transition flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> Fake PayPal Spoof
+          </button>
+          <button onclick="loadSample('phishEntropy')" class="text-xs font-mono px-2.5 py-1 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 text-red-300 transition flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span> DGA Entropy Mask
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      
+      <!-- Left Column: Gauge & Verdict -->
+      <div class="lg:col-span-5 flex flex-col gap-6">
+        
+        <!-- Score Card -->
+        <div class="bg-cyberCard backdrop-blur-xl border border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center text-center relative overflow-hidden">
+          <div class="w-full flex items-center justify-between mb-4">
+            <span class="text-xs font-mono text-slate-400 uppercase tracking-widest flex items-center gap-1">
+              <i data-lucide="gauge" class="w-3.5 h-3.5 text-cyan-400"></i> Threat Gauge
+            </span>
+            <span id="engineBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">
+              Heuristic Engine
+            </span>
+          </div>
+
+          <!-- Circular SVG Progress Meter -->
+          <div class="relative w-52 h-52 my-2 flex items-center justify-center">
+            <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+              <!-- Background Circle -->
+              <circle 
+                cx="50" cy="50" r="40" 
+                class="stroke-slate-800" 
+                stroke-width="8" 
+                fill="none" 
+              />
+              <!-- Animated Progress Circle -->
+              <circle 
+                id="meterCircle"
+                cx="50" cy="50" r="40" 
+                class="meter-circle stroke-cyan-400" 
+                stroke-width="8" 
+                stroke-linecap="round"
+                stroke-dasharray="251.2" 
+                stroke-dashoffset="251.2" 
+                fill="none" 
+              />
+            </svg>
+
+            <!-- Inner Meter Score Value -->
+            <div class="absolute inset-0 flex flex-col items-center justify-center">
+              <span id="probabilityText" class="text-4xl font-black font-mono tracking-tight text-white">0%</span>
+              <span class="text-xs font-mono text-slate-400 uppercase tracking-wider mt-1">Phishing Risk</span>
+            </div>
+          </div>
+
+          <!-- Final Verdict Status Card -->
+          <div id="verdictBox" class="w-full mt-4 p-4 rounded-xl border border-slate-800 bg-slate-900/60 transition duration-300">
+            <div class="flex items-center justify-center gap-2 mb-1">
+              <span id="verdictIcon">
+                <i data-lucide="shield" class="w-6 h-6 text-slate-400"></i>
+              </span>
+              <h3 id="verdictTitle" class="text-lg font-bold font-mono tracking-wide text-slate-300">AWAITING INPUT</h3>
+            </div>
+            <p id="verdictSubtitle" class="text-xs text-slate-400 font-sans">
+              Enter a target URL above to compute lexical telemetry & risk indicators.
+            </p>
+          </div>
+
+        </div>
+
+        <!-- Security Recommendations -->
+        <div class="bg-cyberCard backdrop-blur-xl border border-slate-800 rounded-2xl p-5">
+          <h4 class="text-xs font-mono text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+            <i data-lucide="info" class="w-3.5 h-3.5 text-cyan-400"></i> Incident Advisory
+          </h4>
+          <ul id="advisoryList" class="space-y-2 text-xs font-sans text-slate-300">
+            <li class="flex items-start gap-2 text-slate-400">
+              <span class="text-cyan-400 font-mono font-bold">•</span> Awaiting URL scan sequence.
+            </li>
+          </ul>
+        </div>
+
+      </div>
+
+      <div class="lg:col-span-7 flex flex-col gap-6">
+        
+        <!-- Extracted Lexical Vectors -->
+        <div class="bg-cyberCard backdrop-blur-xl border border-slate-800 rounded-2xl p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-semibold tracking-wide text-white flex items-center gap-2">
+              <i data-lucide="binary" class="w-4 h-4 text-cyan-400"></i>
+              EXTRACTED LEXICAL FEATURES
+            </h3>
+            <span class="text-xs font-mono text-slate-400">Random Forest Vector [13 Features]</span>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3.5" id="featureGrid">
+            
+            <!-- Length -->
+            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+              <span class="text-[11px] font-mono text-slate-400">URL Length</span>
+              <span id="featLength" class="text-lg font-bold font-mono text-white mt-1">--</span>
+              <span id="featLengthNote" class="text-[10px] text-slate-400 mt-0.5">Threshold: &gt;75 chars</span>
+            </div>
+
+            <!-- Shannon Entropy -->
+            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+              <span class="text-[11px] font-mono text-slate-400">Shannon Entropy</span>
+              <span id="featEntropy" class="text-lg font-bold font-mono text-white mt-1">--</span>
+              <span id="featEntropyNote" class="text-[10px] text-slate-400 mt-0.5">High: &gt;4.2 bits</span>
+            </div>
+
+            <!-- IP as Host -->
+            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+              <span class="text-[11px] font-mono text-slate-400">IP Host Pattern</span>
+              <span id="featIp" class="text-lg font-bold font-mono text-white mt-1">--</span>
+              <span id="featIpNote" class="text-[10px] text-slate-400 mt-0.5">IPv4 / IPv6</span>
+            </div>
+
+            <!-- Subdomains -->
+            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+              <span class="text-[11px] font-mono text-slate-400">Subdomain Count</span>
+              <span id="featSubdomains" class="text-lg font-bold font-mono text-white mt-1">--</span>
+              <span id="featSubdomainsNote" class="text-[10px] text-slate-400 mt-0.5">Suspicious: &gt;2</span>
+            </div>
+
+            <!-- Dots Count -->
+            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+              <span class="text-[11px] font-mono text-slate-400">Dots (.) Count</span>
+              <span id="featDots" class="text-lg font-bold font-mono text-white mt-1">--</span>
+              <span class="text-[10px] text-slate-400 mt-0.5">Delimiter nesting</span>
+            </div>
+
+            <!-- Suspicious Symbols -->
+            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+              <span class="text-[11px] font-mono text-slate-400">Symbols (@, -, //)</span>
+              <span id="featSymbols" class="text-lg font-bold font-mono text-white mt-1">--</span>
+              <span class="text-[10px] text-slate-400 mt-0.5">Obfuscation flags</span>
+            </div>
+
+            <!-- Protocol -->
+            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+              <span class="text-[11px] font-mono text-slate-400">Protocol Scheme</span>
+              <span id="featProtocol" class="text-lg font-bold font-mono text-white mt-1">--</span>
+              <span id="featProtocolNote" class="text-[10px] text-slate-400 mt-0.5">TLS / SSL</span>
+            </div>
+
+            <!-- Path Depth -->
+            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+              <span class="text-[11px] font-mono text-slate-400">Slash (/) Depth</span>
+              <span id="featPathDepth" class="text-lg font-bold font-mono text-white mt-1">--</span>
+              <span class="text-[10px] text-slate-400 mt-0.5">Directory layering</span>
+            </div>
+
+            <!-- Queries & Params -->
+            <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+              <span class="text-[11px] font-mono text-slate-400">Query Param Density</span>
+              <span id="featParams" class="text-lg font-bold font-mono text-white mt-1">--</span>
+              <span class="text-[10px] text-slate-400 mt-0.5">Tokens &amp; IDs</span>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Explainability & Heuristics Breakdown -->
+        <div class="bg-cyberCard backdrop-blur-xl border border-slate-800 rounded-2xl p-6">
+          <h3 class="text-sm font-semibold tracking-wide text-white flex items-center gap-2 mb-3">
+            <i data-lucide="cpu" class="w-4 h-4 text-cyan-400"></i>
+            MODEL INFERENCE AUDIT LOG
+          </h3>
+          <div id="auditLog" class="p-4 rounded-xl bg-slate-950/70 border border-slate-800 font-mono text-xs text-slate-400 space-y-1.5 max-h-48 overflow-y-auto">
+            <p class="text-slate-500">// System ready. Load a URL or click one of the preset tests above.</p>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer class="border-t border-slate-800/80 bg-cyberDark/60 backdrop-blur-sm py-4">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400 font-mono">
+      <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>M1 Apple Silicon Optimized &bull; RandomForest Vector Classifier</span>
+      </div>
+      <div>
+        <span>Backend endpoint: <code class="text-cyan-400">http://127.0.0.1:8000/scan</code></span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Notification Toast Container -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition duration-300 p-4 rounded-xl shadow-2xl font-mono text-xs flex items-center gap-3"></div>
+
+  <script>
+    // State variables
+    let currentEngineMode = 'client'; // 'client' or 'server'
+    const CIRCLE_CIRCUMFERENCE = 2 * Math.PI * 40; // r=40 -> ~251.32
+
+    // Presets for instant testing
+    const SAMPLES = {
+      safe1: 'https://www.apple.com/macbook-air-m1/specs/',
+      safe2: 'https://docs.github.com/en/get-started/getting-started-with-git',
+      phishIp: 'http://192.168.1.104/bankofamerica/secure-login.php?user_token=92813',
+      phishBrand: 'http://paypal.com.account-verification-notice.xyz-security.top/auth.php?id=3819',
+      phishEntropy: 'http://secure-netflix-update.x8f2a9d821a.recover-id.cc/signin/?token=9821'
+    };
+
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      pingServer();
+      // Auto test sample on load
+      loadSample('phishBrand');
+    });
+
+    function setEngineMode(mode) {
+      currentEngineMode = mode;
+      const btnClient = document.getElementById('btnModeClient');
+      const btnServer = document.getElementById('btnModeServer');
+      const badge = document.getElementById('engineBadge');
+
+      if (mode === 'client') {
+        btnClient.className = 'px-3 py-1.5 rounded-md text-cyan-300 bg-cyan-950/70 border border-cyan-500/40 transition';
+        btnServer.className = 'px-3 py-1.5 rounded-md text-slate-400 hover:text-slate-200 transition';
+        badge.innerText = 'Client Heuristic Engine';
+        badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300';
+        showToast('Switched to Client Heuristics Mode', 'info');
+      } else {
+        btnServer.className = 'px-3 py-1.5 rounded-md text-cyan-300 bg-cyan-950/70 border border-cyan-500/40 transition';
+        btnClient.className = 'px-3 py-1.5 rounded-md text-slate-400 hover:text-slate-200 transition';
+        badge.innerText = 'FastAPI Model Server (:8000)';
+        badge.className = 'text-[11px] font-mono px-2 py-0.5 rounded bg-cyan-950 border border-cyan-500/30 text-cyan-300';
+        showToast('Switched to FastAPI Backend Mode', 'info');
+        pingServer();
+      }
+    }
+
+    // Ping check for the local FastAPI server
+    async function pingServer() {
+      const pingDot = document.getElementById('serverPingDot');
+      const pingText = document.getElementById('serverPingText');
+      try {
+        const res = await fetch('http://127.0.0.1:8000/', { method: 'GET', mode: 'cors' });
+        if (res.ok) {
+          pingDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+          pingText.innerText = 'FastAPI: Online';
+          pingText.classList.add('text-emerald-300');
+        } else {
+          throw new Error('Not 200');
+        }
+      } catch (err) {
+        pingDot.className = 'w-2 h-2 rounded-full bg-amber-500';
+        pingText.innerText = 'FastAPI: Offline';
+        pingText.classList.remove('text-emerald-300');
+      }
+    }
+
+    function loadSample(key) {
+      if (SAMPLES[key]) {
+        document.getElementById('urlInput').value = SAMPLES[key];
+        analyzeCurrentUrl();
+      }
+    }
+
+    async function pasteClipboard() {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          document.getElementById('urlInput').value = text;
+          showToast('URL Pasted from clipboard', 'info');
+          analyzeCurrentUrl();
+        }
+      } catch (err) {
+        showToast('Clipboard read not permitted by browser', 'error');
+      }
+    }
+
+    function extractClientFeatures(rawUrl) {
+      let url = rawUrl.trim();
+      let hasScheme = url.startsWith('http://') || url.startsWith('https://');
+      let cleanUrl = hasScheme ? url : 'http://' + url;
+
+      let hostname = '';
+      let pathname = '';
+      let search = '';
+
+      try {
+        const parsed = new URL(cleanUrl);
+        hostname = parsed.hostname || '';
+        pathname = parsed.pathname || '';
+        search = parsed.search || '';
+      } catch (e) {
+        // Fallback for edge formats
+        hostname = cleanUrl.split('/')[2] || cleanUrl;
+      }
+
+      // Shannon Entropy Calculation
+      let entropy = 0;
+      if (url.length > 0) {
+        const freq = {};
+        for (let char of url) {
+          freq[char] = (freq[char] || 0) + 1;
+        }
+        for (let char in freq) {
+          let p = freq[char] / url.length;
+          entropy -= p * Math.log2(p);
+        }
+      }
+
+      // Raw IP pattern check (IPv4)
+      const ipPattern = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
+      const hasIp = ipPattern.test(hostname) ? 1 : 0;
+
+      // Subdomains calculation
+      const hostParts = hostname.split('.');
+      const subdomainCount = Math.max(0, hostParts.length - 2);
+
+      // Symbol counts
+      const countDots = (url.match(/\./g) || []).length;
+      const countHyphens = (url.match(/-/g) || []).length;
+      const countAt = (url.match(/@/g) || []).length;
+      const countSlash = (url.match(/\//g) || []).length;
+      const countQuestion = (url.match(/\?/g) || []).length;
+      const countEqual = (url.match(/=/g) || []).length;
+
+      return {
+        url_length: url.length,
+        hostname_length: hostname.length,
+        path_length: pathname.length,
+        count_dots: countDots,
+        count_hyphens: countHyphens,
+        count_at: countAt,
+        count_slash: countSlash,
+        count_question: countQuestion,
+        count_equal: countEqual,
+        has_ip: hasIp,
+        subdomain_count: subdomainCount,
+        entropy: parseFloat(entropy.toFixed(4)),
+        is_https: url.startsWith('https://') ? 1 : 0,
+        hostname: hostname,
+        pathname: pathname
+      };
+    }
+
+    // Client-side heuristics inference engine mimicking the Random Forest weighting
+    function evaluateHeuristics(feats) {
+      let riskScore = 0.05; // Base prior probability
+      const audit = [];
+
+      // 1. IP Check (Massive red flag)
+      if (feats.has_ip === 1) {
+        riskScore += 0.50;
+        audit.push('CRITICAL: Host is an unmapped raw IP address (+50%)');
+      }
+
+      // 2. "@" Symbol in URL (Browser truncation technique)
+      if (feats.count_at > 0) {
+        riskScore += 0.35;
+        audit.push('HIGH: Contains "@" character (authority truncation spoof) (+35%)');
+      }
+
+      // 3. Subdomain depth (e.g. paypal.com.account-update.xyz)
+      if (feats.subdomain_count >= 3) {
+        riskScore += 0.30;
+        audit.push(`HIGH: Nested subdomain depth (${feats.subdomain_count} layers) (+30%)`);
+      } else if (feats.subdomain_count === 2) {
+        riskScore += 0.15;
+        audit.push(`WARN: Multi-level subdomains detected (+15%)`);
+      }
+
+      // 4. Known brand spoofing in subdomains
+      const targets = ['paypal', 'netflix', 'apple', 'chase', 'wellsfargo', 'bankofamerica', 'microsoft', 'google'];
+      const hostParts = feats.hostname.toLowerCase().split('.');
+      const primaryDomain = hostParts.slice(-2).join('.');
+      
+      for (let t of targets) {
+        if (feats.hostname.toLowerCase().includes(t) && !primaryDomain.includes(t)) {
+          riskScore += 0.40;
+          audit.push(`HIGH: Brand token "${t}" masquerading in secondary subdomain (+40%)`);
+        }
+      }
+
+      // 5. High Shannon Entropy (Random DGA strings)
+      if (feats.entropy > 4.3) {
+        riskScore += 0.22;
+        audit.push(`WARN: High Shannon entropy (${feats.entropy} bits) indicating token masking (+22%)`);
+      }
+
+      // 6. Excessive length
+      if (feats.url_length > 80) {
+        riskScore += 0.15;
+        audit.push(`WARN: Extended URL length (${feats.url_length} chars) (+15%)`);
+      }
+
+      // 7. Excessive hyphens
+      if (feats.count_hyphens >= 3) {
+        riskScore += 0.12;
+        audit.push(`WARN: High hyphen density (${feats.count_hyphens}) common in typo-squatting (+12%)`);
+      }
+
+      // 8. HTTPS penalty reduction
+      if (feats.is_https === 0) {
+        riskScore += 0.10;
+        audit.push(`INFO: Unencrypted plain HTTP protocol (+10%)`);
+      }
+
+      // Cap at 0.05 to 0.99
+      riskScore = Math.min(0.99, Math.max(0.02, riskScore));
+      return { score: riskScore, audit };
+    }
+
+    async function analyzeCurrentUrl() {
+      const urlInput = document.getElementById('urlInput');
+      const rawUrl = urlInput.value.trim();
+
+      if (!rawUrl) {
+        showToast('Please enter a target URL to scan', 'error');
+        return;
+      }
+
+      const scanBtn = document.getElementById('scanBtn');
+      scanBtn.disabled = true;
+      scanBtn.classList.add('opacity-75', 'cursor-not-allowed');
+
+      const features = extractClientFeatures(rawUrl);
+      updateFeatureGrid(features);
+
+      let finalScore = 0;
+      let isPhishing = false;
+      let auditItems = [];
+
+      if (currentEngineMode === 'server') {
+        try {
+          const res = await fetch('http://127.0.0.1:8000/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: rawUrl })
+          });
+
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+
+          finalScore = (data.phishing_probability_pct || data.confidence_score * 100) / 100;
+          isPhishing = data.is_phishing;
+          auditItems.push(`Inference from FastAPI (Apple Silicon M1 Core)`);
+          auditItems.push(`Model confidence score: ${(finalScore * 100).toFixed(2)}%`);
+          auditItems.push(`Model assigned risk level: ${data.risk_level}`);
+        } catch (err) {
+          showToast('Could not reach FastAPI server at :8000. Falling back to Heuristics.', 'error');
+          const evalResult = evaluateHeuristics(features);
+          finalScore = evalResult.score;
+          auditItems = evalResult.audit;
+          isPhishing = finalScore >= 0.55;
+        }
+      } else {
+        const evalResult = evaluateHeuristics(features);
+        finalScore = evalResult.score;
+        auditItems = evalResult.audit;
+        isPhishing = finalScore >= 0.55;
+      }
+
+      renderResults(rawUrl, features, finalScore, isPhishing, auditItems);
+
+      scanBtn.disabled = false;
+      scanBtn.classList.remove('opacity-75', 'cursor-not-allowed');
+    }
+
+    function updateFeatureGrid(f) {
+      document.getElementById('featLength').innerText = `${f.url_length} chars`;
+      document.getElementById('featEntropy').innerText = `${f.entropy}`;
+      
+      const ipElem = document.getElementById('featIp');
+      ipElem.innerText = f.has_ip ? 'DETECTED' : 'None';
+      ipElem.className = f.has_ip ? 'text-lg font-bold font-mono text-red-400 mt-1' : 'text-lg font-bold font-mono text-emerald-400 mt-1';
+
+      const subElem = document.getElementById('featSubdomains');
+      subElem.innerText = `${f.subdomain_count}`;
+      subElem.className = f.subdomain_count > 2 ? 'text-lg font-bold font-mono text-amber-400 mt-1' : 'text-lg font-bold font-mono text-white mt-1';
+
+      document.getElementById('featDots').innerText = `${f.count_dots}`;
+      document.getElementById('featSymbols').innerText = `@:${f.count_at} | -:${f.count_hyphens}`;
+      
+      const protoElem = document.getElementById('featProtocol');
+      protoElem.innerText = f.is_https ? 'HTTPS (TLS)' : 'HTTP (Plain)';
+      protoElem.className = f.is_https ? 'text-lg font-bold font-mono text-emerald-400 mt-1' : 'text-lg font-bold font-mono text-amber-400 mt-1';
+
+      document.getElementById('featPathDepth').innerText = `${f.count_slash}`;
+      document.getElementById('featParams').innerText = `?:${f.count_question} | =:${f.count_equal}`;
+    }
+
+    function renderResults(url, f, score, isPhishing, auditItems) {
+      const percentage = Math.round(score * 100);
+      const probText = document.getElementById('probabilityText');
+      const meter = document.getElementById('meterCircle');
+      const verdictBox = document.getElementById('verdictBox');
+      const verdictIcon = document.getElementById('verdictIcon');
+      const verdictTitle = document.getElementById('verdictTitle');
+      const verdictSubtitle = document.getElementById('verdictSubtitle');
+      const auditLog = document.getElementById('auditLog');
+      const advisoryList = document.getElementById('advisoryList');
+
+      // Animate percentage text
+      let currentVal = 0;
+      const duration = 650;
+      const start = performance.now();
+      
+      function step(now) {
+        const elapsed = now - start;
+        const progress = Math.min(elapsed / duration, 1);
+        currentVal = Math.floor(progress * percentage);
+        probText.innerText = `${currentVal}%`;
+        if (progress < 1) {
+          requestAnimationFrame(step);
+        }
+      }
+      requestAnimationFrame(step);
+
+      // Circle stroke dash offset
+      const offset = CIRCLE_CIRCUMFERENCE - (percentage / 100) * CIRCLE_CIRCUMFERENCE;
+      meter.style.strokeDashoffset = offset;
+
+      // Color and verdict routing
+      if (percentage >= 70) {
+        // High Risk Phishing
+        meter.setAttribute('class', 'meter-circle stroke-red-500 shadow-glow-red');
+        verdictBox.className = 'w-full mt-4 p-4 rounded-xl border border-red-500/50 bg-red-950/40 shadow-glow-red transition duration-300';
+        verdictIcon.innerHTML = `<i data-lucide="shield-alert" class="w-6 h-6 text-red-400"></i>`;
+        verdictTitle.innerText = 'HIGH RISK: PHISHING DETECTED';
+        verdictTitle.className = 'text-lg font-bold font-mono tracking-wide text-red-400';
+        verdictSubtitle.innerText = 'Significant malicious indicators found. Do not enter credentials or navigate here.';
+        
+        advisoryList.innerHTML = `
+          <li class="flex items-start gap-2 text-red-300">
+            <span class="text-red-400 font-bold">&times;</span> Immediate block recommended. Do not click or route credentials.
+          </li>
+          <li class="flex items-start gap-2 text-slate-300">
+            <span class="text-amber-400 font-bold">!</span> Check your SIEM/DNS logs to ensure no client workstations completed this request.
+          </li>
+        `;
+      } else if (percentage >= 40) {
+        // Suspicious / Medium Risk
+        meter.setAttribute('class', 'meter-circle stroke-amber-400');
+        verdictBox.className = 'w-full mt-4 p-4 rounded-xl border border-amber-500/50 bg-amber-950/40 transition duration-300';
+        verdictIcon.innerHTML = `<i data-lucide="alert-triangle" class="w-6 h-6 text-amber-400"></i>`;
+        verdictTitle.innerText = 'SUSPICIOUS / ELEVATED RISK';
+        verdictTitle.className = 'text-lg font-bold font-mono tracking-wide text-amber-400';
+        verdictSubtitle.innerText = 'URL presents unusual lexical patterns or obfuscation. Proceed with extreme caution.';
+
+        advisoryList.innerHTML = `
+          <li class="flex items-start gap-2 text-amber-300">
+            <span class="text-amber-400 font-bold">!</span> Inspect authoritative root domain whois records before authorization.
+          </li>
+          <li class="flex items-start gap-2 text-slate-300">
+            <span class="text-cyan-400 font-bold">&bull;</span> Isolate session inside a sandboxed container if interaction is necessary.
+          </li>
+        `;
+      } else {
+        // Safe / Legitimate
+        meter.setAttribute('class', 'meter-circle stroke-emerald-400 shadow-glow-green');
+        verdictBox.className = 'w-full mt-4 p-4 rounded-xl border border-emerald-500/50 bg-emerald-950/40 shadow-glow-green transition duration-300';
+        verdictIcon.innerHTML = `<i data-lucide="shield-check" class="w-6 h-6 text-emerald-400"></i>`;
+        verdictTitle.innerText = 'VERDICT: SAFE / BENIGN';
+        verdictTitle.className = 'text-lg font-bold font-mono tracking-wide text-emerald-400';
+        verdictSubtitle.innerText = 'Standard lexical structure matching legitimate corporate domains.';
+
+        advisoryList.innerHTML = `
+          <li class="flex items-start gap-2 text-emerald-300">
+            <span class="text-emerald-400 font-bold">&check;</span> Structural telemetry conforms to benign standards.
+          </li>
+        `;
+
+        // Confetti effect for safe URLs
+        try {
+          confetti({
+            particleCount: 35,
+            spread: 50,
+            origin: { y: 0.8 },
+            colors: ['#10b981', '#06b6d4', '#ffffff']
+          });
+        } catch(e) {}
+      }
+
+      // Populate Audit Logs
+      auditLog.innerHTML = auditItems.map(item => `
+        <div class="flex items-start gap-2">
+          <span class="text-cyan-400 select-none">&gt;</span>
+          <span>${item}</span>
+        </div>
+      `).join('');
+
+      lucide.createIcons();
+    }
+
+    function showToast(msg, type = 'info') {
+      const toast = document.getElementById('toast');
+      const bg = type === 'error' ? 'bg-red-950/90 border border-red-500 text-red-200' : 'bg-slate-900 border border-cyan-500/50 text-cyan-200';
+      toast.className = `fixed bottom-5 right-5 z-50 transform translate-y-0 opacity-100 transition duration-300 p-4 rounded-xl shadow-2xl font-mono text-xs flex items-center gap-2 ${bg}`;
+      toast.innerHTML = `<i data-lucide="${type === 'error' ? 'alert-octagon' : 'check-circle-2'}" class="w-4 h-4"></i> <span>${msg}</span>`;
+      lucide.createIcons();
+
+      setTimeout(() => {
+        toast.className = toast.className.replace('translate-y-0 opacity-100', 'translate-y-20 opacity-0');
+      }, 3200);
+    }
+  </script>
+</body>
+</html>
